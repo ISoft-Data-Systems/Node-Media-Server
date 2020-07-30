@@ -959,7 +959,8 @@ const rtmpCmdCode = {
   "receiveVideo": ["transId", "cmdObj", "bool"],
   "publish": ["transId", "cmdObj", "streamName", "type"],
   "seek": ["transId", "cmdObj", "ms"],
-  "pause": ["transId", "cmdObj", "pause", "ms"]
+  "pause": ["transId", "cmdObj", "pause", "ms"],
+  "packet": ["transId", "cmdObj", "messageTypeId", "messageId", "data"],
 };
 
 const rtmpDataCode = {
@@ -1019,8 +1020,37 @@ function decodeAMF0Cmd(dbuf) {
     rtmpCmdCode[cmd.value].forEach(function (n) {
       if (buffer.length > 0) {
         let r = amf0DecodeOne(buffer);
-        buffer = buffer.slice(r.len);
-        resp[n] = r.value;
+        if (r.value !== undefined) {
+          buffer = buffer.slice(r.len);
+          resp[n] = r.value;
+        }
+        else {
+          /*  ARRAY 0x07 0x01 0x06 <garbage byte I don't understand> <data> 0x06 <garbage byte I don't understand> <data> 0x04 0x01 */
+          if (buffer[0] == 0x11) {
+            // That flag says we should switch to AMF3
+            if (buffer[1] == 0x09) {
+              // this is an array
+              let acc = new Array()
+              let blockPos
+              buffer = buffer.slice(3)
+              while (buffer.length > 0 && buffer[0] != 0x04) {
+                blockPos = buffer.indexOf(0x06)
+                if (blockPos != -1) {
+                  // slice off the 0x06 byte, anything that leads it, and the following byte.
+                  buffer = buffer.slice(blockPos + 2)
+                  // look for the next 0x06, or 0x04 if 0x06 can't be found
+                  blockPos = buffer.indexOf(0x06, blockPos)
+                  if (blockPos == -1) {
+                    blockPos = buffer.indexOf(0x04)
+                  }
+                  acc.push(buffer.toString('utf8', 0, blockPos))
+                  buffer = buffer.slice(blockPos)
+                }
+              }
+              resp[n] = acc;
+            }
+          }
+        }
       }
     });
   } else {
